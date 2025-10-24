@@ -20,7 +20,10 @@ OPENMETEO_LIMIT = 900
 RS485_DEV = "/dev/ttyUSB0"
 RS485_BAUD = 9600
 RS485_TIMEOUT = 1
-RS485_DATA_LENGTH = 37  # Protocol overhead (excluding SOH): receiverID + senderID + length + STX + payload + checksum + ETX + EOT
+# Packet structure: SOH(1) + receiverID(1) + senderID(1) + length(1) + STX(1) + payload(N) + checksum(1) + ETX(1) + EOT(1)
+# For IMU packets: payload = 29 bytes → total packet = 37 bytes
+# For POLL commands: payload = 4 bytes → total packet = 12 bytes
+RS485_DATA_LENGTH = 37  # Maximum expected packet size (for IMU data)
 
 # Server settings
 SERVER_URL = "Put your server URL here."
