@@ -5,21 +5,26 @@ from logger import logger
 from restapi import stream_to_server, update_weather_data
 from helpers import create_kalman, apply_kalman_filter, quaternion_to_roll, calculate_displacement
 
-from environments import RS485_DATA_LENGTH, STATION_ID, OPERATION_FREQ, RS485_DEV, RS485_BAUD, RS485_TIMEOUT
+from environments import RS485_DATA_LENGTH, STATION_ID, OPERATION_FREQ, RS485_DEV, RS485_BAUD, RS485_TIMEOUT, MASTER_ID, SLAVE_IDS
 
-ser = None 
+ser = None
+current_slave_index = 0  # For round-robin polling
+
+def init_serial():
+    """Initialize serial port if not already open."""
+    global ser
+
+    if ser is None:
+        ser = serial.Serial(port=RS485_DEV,
+                           baudrate=RS485_BAUD,
+                           timeout=RS485_TIMEOUT)
+        logger.info(f"Serial port opened: {RS485_DEV} at {RS485_BAUD} baud")
 
 def read_rs485():
     """Read BNO055 IMU data sent through RS485."""
     global ser
 
     try:
-        if ser is None:
-            ser = serial.Serial(port=RS485_DEV,
-                                   baudrate=RS485_BAUD,
-                                   timeout=RS485_TIMEOUT)
-            logger.info(f"Serial port opened: {RS485_DEV} at {RS485_BAUD} baud")
-
         # Synchronize to SOH (0x01) byte and read variable-length packets
         data = None
         while ser.in_waiting > 0:
@@ -136,48 +141,111 @@ def read_rs485():
         logger.error("Error related to serial ports: {0}".format(err))
         exit(1)
 
+def send_poll_command(slave_id):
+    """Send POLL command to a specific slave node."""
+    global ser
+
+    try:
+        # POLL Command Packet Structure:
+        # SOH(0x01) + receiverID + senderID(MASTER_ID) + length(4) + STX(0x02) + "POLL"(4 bytes) + checksum + ETX(0x03) + EOT(0x04)
+        # Total: 12 bytes
+
+        payload = b"POLL"
+        payload_length = len(payload)
+
+        # Calculate checksum (XOR of payload bytes)
+        checksum = 0
+        for byte in payload:
+            checksum ^= byte
+
+        # Build packet
+        packet = bytearray()
+        packet.append(0x01)              # SOH
+        packet.append(slave_id)          # receiverID (slave to poll)
+        packet.append(MASTER_ID)         # senderID (master)
+        packet.append(payload_length)    # payload length (4)
+        packet.append(0x02)              # STX
+        packet.extend(payload)           # "POLL"
+        packet.append(checksum)          # checksum
+        packet.append(0x03)              # ETX
+        packet.append(0x04)              # EOT
+
+        # Send POLL command
+        ser.write(packet)
+        logger.debug(f"Sent POLL command to slave {slave_id}: {packet.hex()}")
+
+        return True
+
+    except serial.SerialException as err:
+        logger.error(f"Error sending POLL command: {err}")
+        return False
+
 def main():
     """Main code is written here."""
+    global current_slave_index
 
     kalman = create_kalman()
 
+    logger.info("=" * 50)
+    logger.info("RPi MASTER MODE - Polling slaves")
+    logger.info(f"Slave IDs to poll: {SLAVE_IDS}")
+    logger.info(f"Poll interval: {OPERATION_FREQ}s")
+    logger.info("=" * 50)
+
+    # Initialize serial port once at startup
+    init_serial()
+
     while True:
-        sensor_id, quat, accel = read_rs485()
+        # Get current slave to poll (round-robin)
+        if len(SLAVE_IDS) > 0:
+            slave_id = SLAVE_IDS[current_slave_index]
 
-        if sensor_id is not None:
-            logger.info("Received Data: From node ID {0}, QuatW: {1}, QuatX: {2}, QuatY: {3}, QuatZ: {4}.".format(sensor_id,
-                                                                                                                  quat[0],
-                                                                                                                  quat[1],
-                                                                                                                  quat[2],
-                                                                                                                  quat[3]))
+            logger.info(f"Polling slave {slave_id}...")
 
-            try:
-                quat_filtered = apply_kalman_filter(kalman, quat)
-                roll = quaternion_to_roll(quat_filtered)
-                disp = calculate_displacement(roll, sensor_id, True)
-                # weather_data = update_weather_data()
+            # Send POLL command to slave
+            if send_poll_command(slave_id):
+                # Poll at the operating frequency
+                time.sleep(OPERATION_FREQ) 
 
-                data = {
-                    "profile_id": "",
-                    "station_id": STATION_ID,
-                    "sensor_id": sensor_id,
-                    "displacement": disp,
-                    "accel_x": accel[0],
-                    "accel_y": accel[1],
-                    "accel_z": accel[2],
-                    "temperature": 32.12,
-                    "humidity": 98.7,
-                    "wind_speed": 2.5,
-                    "wind_direction": 180.0
-                }
+                # Try to read response (read_rs485 will handle timeout via serial port)
+                sensor_id, quat, accel = read_rs485()
 
-                # stream_to_server(data = data)
-            except ValueError as e:
-                logger.error(f"Error processing data from node {sensor_id}: {e}. Skipping packet.")
+                if sensor_id is not None:
+                    logger.info("Received Data: From node ID {0}, QuatW: {1:.3f}, QuatX: {2:.3f}, QuatY: {3:.3f}, QuatZ: {4:.3f}".format(
+                        sensor_id, quat[0], quat[1], quat[2], quat[3]))
+
+                    try:
+                        quat_filtered = apply_kalman_filter(kalman, quat)
+                        roll = quaternion_to_roll(quat_filtered)
+                        disp = calculate_displacement(roll, sensor_id, True)
+                        # weather_data = update_weather_data()
+
+                        data = {
+                            "profile_id": "",
+                            "station_id": STATION_ID,
+                            "sensor_id": sensor_id,
+                            "displacement": disp,
+                            "accel_x": accel[0],
+                            "accel_y": accel[1],
+                            "accel_z": accel[2],
+                            "temperature": 32.12,
+                            "humidity": 98.7,
+                            "wind_speed": 2.5,
+                            "wind_direction": 180.0
+                        }
+
+                        # stream_to_server(data = data)
+                    except ValueError as e:
+                        logger.error(f"Error processing data from node {sensor_id}: {e}. Skipping packet.")
+                else:
+                    logger.warning(f"No response from slave {slave_id}")
+            else:
+                logger.error(f"Failed to send POLL command to slave {slave_id}")
+
+            # Move to next slave (round-robin)
+            current_slave_index = (current_slave_index + 1) % len(SLAVE_IDS)
         else:
-            logger.info("No data received.")
-
-        time.sleep(OPERATION_FREQ)
+            logger.warning("No slaves configured in SLAVE_IDS")
 
 if __name__ == "__main__":
     main()

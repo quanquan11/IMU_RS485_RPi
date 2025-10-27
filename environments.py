@@ -1,5 +1,5 @@
 # System settings
-OPERATION_FREQ = 0.1
+OPERATION_FREQ = 0.1  # Delay between polling cycles in seconds (affects overall polling rate)
 SEGMENT_LENGTH_CM = [3, 6]
 INVERT_DIRECTION = False
 STATION_ID = "903056a7-e59a-42b6-b644-baa6a45de45a"
@@ -24,6 +24,11 @@ RS485_TIMEOUT = 1
 # For IMU packets: payload = 29 bytes → total packet = 37 bytes
 # For POLL commands: payload = 4 bytes → total packet = 12 bytes
 RS485_DATA_LENGTH = 37  # Maximum expected packet size (for IMU data)
+
+# Master polling settings
+MASTER_ID = 0xFF  # Master node ID (255 = broadcast address)
+SLAVE_IDS = [0, 1]  # List of slave node IDs to poll
+# POLL_TIMEOUT = 0.5  # Timeout for slave response in seconds (100ms)
 
 # Server settings
 SERVER_URL = "Put your server URL here."
