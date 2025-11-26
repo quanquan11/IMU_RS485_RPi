@@ -4,11 +4,13 @@ import numpy as np
 from logger import logger
 from restapi import stream_to_server, update_weather_data
 from helpers import create_kalman, apply_kalman_filter, quaternion_to_roll, calculate_displacement
+from weather_sensor import WeatherSensor
 
 from environments import RS485_DATA_LENGTH, STATION_ID, OPERATION_FREQ, RS485_DEV, RS485_BAUD, RS485_TIMEOUT, MASTER_ID, SLAVE_IDS
 
 ser = None
 current_slave_index = 0  # For round-robin polling
+weather_sensor = None  # Weather sensor instance
 
 def init_serial():
     """Initialize serial port if not already open."""
@@ -141,6 +143,26 @@ def read_rs485():
         logger.error("Error related to serial ports: {0}".format(err))
         exit(1)
 
+def read_weather():
+    """
+    Read weather data from dedicated weather sensor port.
+    Returns weather data dict or None if failed.
+    """
+    global weather_sensor
+
+    if weather_sensor is None or not weather_sensor.initialized:
+        logger.debug("Weather sensor not available")
+        return None
+
+    try:
+        # Read weather data (uses separate RS485 port - no conflict with IMU)
+        weather_data = weather_sensor.read_data()
+        return weather_data
+
+    except Exception as err:
+        logger.error(f"Error reading weather data: {err}")
+        return None
+
 def send_poll_command(slave_id):
     """Send POLL command to a specific slave node."""
     global ser
@@ -182,9 +204,18 @@ def send_poll_command(slave_id):
 
 def main():
     """Main code is written here."""
-    global current_slave_index
+    global current_slave_index, weather_sensor
 
     kalman = create_kalman()
+
+    # Initialize weather sensor (uses separate RS485 port)
+    weather_sensor = WeatherSensor()
+    weather_initialized = weather_sensor.initialize()
+
+    if weather_initialized:
+        logger.info("Weather sensors initialized successfully on separate RS485 port")
+    else:
+        logger.warning("Weather sensors failed to initialize - continuing with IMU only")
 
     logger.info("=" * 50)
     logger.info("RPi MASTER MODE - Polling slaves")
@@ -192,10 +223,27 @@ def main():
     logger.info(f"Poll interval: {OPERATION_FREQ}s")
     logger.info("=" * 50)
 
-    # Initialize serial port once at startup
+    # Initialize serial port once at startup (for IMU communication)
     init_serial()
 
+    # Weather data cache (read periodically, not on every IMU poll)
+    last_weather_data = None
+    weather_read_counter = 0
+    WEATHER_READ_INTERVAL = 10  # Read weather every N IMU polls
+
     while True:
+        # Periodically read weather data (less frequently than IMU)
+        weather_read_counter += 1
+        if weather_read_counter >= WEATHER_READ_INTERVAL:
+            logger.info("Reading weather sensors...")
+            weather_data = read_weather()
+            if weather_data is not None:
+                last_weather_data = weather_data
+                logger.info(f"Weather: Temp={weather_data['temperature']:.1f}°C, "
+                          f"Humidity={weather_data['humidity']:.1f}%, "
+                          f"Rain={weather_data['rain']:.2f}mm")
+            weather_read_counter = 0
+
         # Get current slave to poll (round-robin)
         if len(SLAVE_IDS) > 0:
             slave_id = SLAVE_IDS[current_slave_index]
@@ -218,7 +266,16 @@ def main():
                         quat_filtered = apply_kalman_filter(kalman, quat)
                         roll = quaternion_to_roll(quat_filtered)
                         disp = calculate_displacement(roll, sensor_id, True)
-                        # weather_data = update_weather_data()
+
+                        # Use cached weather data if available, otherwise use default values
+                        if last_weather_data is not None:
+                            temperature = last_weather_data['temperature']
+                            humidity = last_weather_data['humidity']
+                            rainfall = last_weather_data['rain']
+                        else:
+                            temperature = None
+                            humidity = None
+                            rainfall = None
 
                         data = {
                             "profile_id": "",
@@ -228,10 +285,9 @@ def main():
                             "accel_x": accel[0],
                             "accel_y": accel[1],
                             "accel_z": accel[2],
-                            "temperature": 32.12,
-                            "humidity": 98.7,
-                            "wind_speed": 2.5,
-                            "wind_direction": 180.0
+                            "temperature": temperature,
+                            "humidity": humidity,
+                            "rainfall": rainfall
                         }
 
                         # stream_to_server(data = data)

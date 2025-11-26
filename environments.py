@@ -16,7 +16,7 @@ OPENMETEO_LATITUDE = 3.0466
 OPENMETEO_LONGITUDE = 101.72955
 OPENMETEO_LIMIT = 900
 
-# RS485 settings
+# RS485 settings for IMU slaves
 RS485_DEV = "/dev/ttyUSB0"
 RS485_BAUD = 9600
 RS485_TIMEOUT = 1
@@ -29,6 +29,16 @@ RS485_DATA_LENGTH = 37  # Maximum expected packet size (for IMU data)
 MASTER_ID = 0xFF  # Master node ID (255 = broadcast address)
 SLAVE_IDS = [0, 1]  # List of slave node IDs to poll
 # POLL_TIMEOUT = 0.5  # Timeout for slave response in seconds (100ms)
+
+# RS485 settings for Weather sensor (separate port)
+RS485_WEATHER_DEV = "/dev/ttyUSB1"  # Separate RS485 port for weather sensor
+RS485_WEATHER_BAUD = 9600
+RS485_WEATHER_TIMEOUT = 1
+RS485_WEATHER_SENSOR_ADDR = 1  # Modbus address for temp/humidity sensor
+
+# Rain gauge settings (I2C)
+RAIN_SENSOR_I2C_BUS = 1        # I2C bus number
+RAIN_SENSOR_I2C_ADDR = 0x1D    # I2C address for rain sensor
 
 # Server settings
 SERVER_URL = "Put your server URL here."
