@@ -1,6 +1,6 @@
 # System settings
 OPERATION_FREQ = 0.1  # Delay between polling cycles in seconds (affects overall polling rate)
-SEGMENT_LENGTH_CM = [3, 6]
+SEGMENT_LENGTH_CM = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100]  # Lengths of each segment in cm
 INVERT_DIRECTION = False
 STATION_ID = "903056a7-e59a-42b6-b644-baa6a45de45a"
 IOT_STATION_KEY = "LSA_RPi"
@@ -27,7 +27,7 @@ RS485_DATA_LENGTH = 37  # Maximum expected packet size (for IMU data)
 
 # Master polling settings
 MASTER_ID = 0xFF  # Master node ID (255 = broadcast address)
-SLAVE_IDS = [0, 1]  # List of slave node IDs to poll
+SLAVE_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # List of slave node IDs to poll
 # POLL_TIMEOUT = 0.5  # Timeout for slave response in seconds (100ms)
 
 # RS485 settings for Weather sensor (separate port)
